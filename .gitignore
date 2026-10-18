@@ -1,0 +1,10 @@
+# Environment variables
+.env*.local
+.env.local
+.env
+# Common ignores
+node_modules
+.next/
+.DS_Store
+
+gemini --resume 2a8c6831-3e95-48a9-9bc8-ca9a5ddce144 

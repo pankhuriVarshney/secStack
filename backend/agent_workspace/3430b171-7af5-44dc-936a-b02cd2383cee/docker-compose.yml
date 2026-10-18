@@ -1,0 +1,35 @@
+name: secstack-3430b171
+networks:
+  labnet:
+    driver: bridge
+    internal: false
+services:
+  kali:
+    build:
+      context: ./kali
+      dockerfile: Dockerfile
+    container_name: secstack-kali-3430b171
+    stdin_open: true
+    tty: true
+    working_dir: /workspace
+    volumes:
+    - ./shared:/workspace
+    networks:
+    - labnet
+    security_opt:
+    - no-new-privileges:true
+    mem_limit: 2g
+  target:
+    build:
+      context: ./target
+      args:
+        FLAG: FLAG{web-sqli-login_a3a3cc54e9b4}
+    container_name: secstack-target-3430b171
+    networks:
+    - labnet
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    mem_limit: 512m
+    pids_limit: 128
