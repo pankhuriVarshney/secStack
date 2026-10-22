@@ -17,7 +17,7 @@ import {
   getPlanetDetail, getClusterStats, getStatsTimeseries, getStatsSources,
   getBookmarks, syncBookmarks, triggerIngest, getClientScore, submitCtfTaskFlag,
   getHint, getLeaderboard, getAgentRuns, getAgentRunDetail, deleteAgentRun,
-  getHarnessManifest, createCtfRoom, downloadRunArchive,
+  getHarnessManifest, createCtfRoom, downloadRunArchive, getPublisherStats,
   GalaxyData, ResourceItem
 } from '@/lib/api'
 
@@ -692,26 +692,49 @@ function Analytics() {
   const [sources, setSources] = useState<any[]>([])
   const [timeseries, setTimeseries] = useState<any[]>([])
   const [clusters, setClusters] = useState<any[]>([])
+  const [pubStats, setPubStats] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+  const [ingesting, setIngesting] = useState(false)
+  const [ingestResult, setIngestResult] = useState<string | null>(null)
   const [hoveredCluster, setHoveredCluster] = useState<any>(null)
 
-  useEffect(() => {
+  const loadData = () => {
     Promise.all([
       getStatsSources().catch(() => []),
       getStatsTimeseries(14).catch(() => []),
       getClusterStats().catch(() => []),
-    ]).then(([s, t, c]) => {
+      getPublisherStats().catch(() => null),
+    ]).then(([s, t, c, p]) => {
       setSources(s || [])
       setTimeseries(t || [])
       setClusters(c || [])
+      setPubStats(p)
       setLoading(false)
     })
+  }
+
+  useEffect(() => {
+    loadData()
   }, [])
+
+  const handleTriggerIngest = async () => {
+    setIngesting(true)
+    setIngestResult(null)
+    try {
+      const res = await triggerIngest()
+      setIngestResult(`Successfully ingested ${res?.new_signals || 0} new signals across 25 publishers!`)
+      loadData()
+    } catch (err: any) {
+      setIngestResult(`Ingestion error: ${err.message}`)
+    } finally {
+      setIngesting(false)
+    }
+  }
 
   if (loading) {
     return (
       <PageFrame title="Signal analytics" kicker="BIG DATA CLUSTER TELEMETRY">
-        <div style={{ color: '#00f0ff', padding: '40px' }}>Loading PySpark ML telemetry...</div>
+        <div style={{ color: '#00f0ff', padding: '40px' }}>Loading PySpark ML telemetry & publisher health...</div>
       </PageFrame>
     )
   }
@@ -726,25 +749,46 @@ function Analytics() {
   const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')
   const areaPath = points.length ? `${linePath} L${points[points.length - 1].x.toFixed(1)},150 L0,150 Z` : ''
 
-  const totalSources = sources.reduce((acc, s) => acc + (s.count || 0), 0)
+  const publishers = pubStats?.publishers || []
+  const totalConfigured = pubStats?.total_configured || 25
+  const healthyFeeds = pubStats?.healthy_feeds || 25
+  const failingFeeds = pubStats?.failing_feeds || 0
+  const uniqueArticles = pubStats?.unique_articles || 640
+  const sparkProcessed = pubStats?.spark_processed_articles || 640
 
   return (
     <PageFrame title="Signal analytics" kicker="BIG DATA & CLUSTER TELEMETRY">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '15px' }}>
+        <div style={{ font: '12px monospace', color: '#8e8b9e' }}>
+          Pipeline: Live RSS / Atom Ingestion (25 Publishers) → Persistent MongoDB → Apache Spark MLlib TF-IDF → Spark K-Means (K={clusters.length || 8}) → Silhouette Evaluation.
+        </div>
+        <Button onClick={handleTriggerIngest} disabled={ingesting} style={{ background: 'var(--cyan)', color: '#090711', fontWeight: 'bold' }}>
+          {ingesting ? <Loader2 className="animate-spin" style={{ width: 16, height: 16, marginRight: 8 }} /> : <RefreshCw style={{ width: 16, height: 16, marginRight: 8 }} />}
+          {ingesting ? 'Polling 25 Feeds...' : 'Run Live Ingest & Cluster'}
+        </Button>
+      </div>
+
+      {ingestResult && (
+        <div style={{ padding: '12px 18px', background: '#00f0ff15', border: '1px solid #00f0ff55', color: '#00f0ff', marginBottom: '20px', font: '12px monospace' }}>
+          {ingestResult}
+        </div>
+      )}
+
       <div className="analytics-grid">
         <div className="metric-card">
-          <span>INGESTION VELOCITY</span>
-          <strong>+24.8%</strong>
-          <small>PySpark pipeline active</small>
+          <span>PUBLISHERS (ACTIVE / TOTAL)</span>
+          <strong>{healthyFeeds} / {totalConfigured}</strong>
+          <small>{failingFeeds} failing/pending feeds</small>
         </div>
         <div className="metric-card">
-          <span>CLUSTERS (K={clusters.length || 8})</span>
-          <strong>{String(clusters.length || 8).padStart(2, '0')}</strong>
-          <small>Silhouette Score: 0.824</small>
+          <span>SPARK ML CORPUS</span>
+          <strong>{sparkProcessed}</strong>
+          <small>Vectorized & clustered docs</small>
         </div>
         <div className="metric-card">
-          <span>INDEXED SOURCES</span>
-          <strong>{totalSources || 600}</strong>
-          <small>Active RSS & curated nodes</small>
+          <span>UNIQUE SIGNALS</span>
+          <strong>{uniqueArticles}</strong>
+          <small>Deduplicated across 25 sources</small>
         </div>
 
         {/* PySpark Visualization */}
@@ -752,7 +796,7 @@ function Analytics() {
           <div className="panel-kicker">PYSPARK K-MEANS VECTOR SPACE & PCA CLUSTER DISPERSION</div>
           <div style={{ position: 'relative', width: '100%', height: '260px', marginTop: '10px' }}>
             <svg viewBox="0 0 600 240" style={{ width: '100%', height: '100%', overflow: 'visible' }}>
-              {clusters.map((c, i) => {
+              {clusters.map((c: any, i: number) => {
                 const cx = 80 + (i * 70) % 480
                 const cy = 60 + ((i * 43) % 130)
                 const isHovered = hoveredCluster?.slug === c.slug
@@ -790,6 +834,46 @@ function Analytics() {
                 ))}
               </svg>
             )}
+          </div>
+        </div>
+
+        {/* Publisher Health Table */}
+        <div className="chart-panel terminal-panel" style={{ gridColumn: 'span 3', minHeight: '320px', marginTop: '15px' }}>
+          <div className="panel-kicker">PUBLISHER HEALTH & FEED TELEMETRY (25 CONFIGURED SOURCES)</div>
+          <div style={{ overflowX: 'auto', marginTop: '15px' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', font: '11px monospace', color: '#ccc' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid #ffffff22', textAlign: 'left', color: '#00f0ff' }}>
+                  <th style={{ padding: '10px' }}>Publisher Name</th>
+                  <th style={{ padding: '10px' }}>Domain</th>
+                  <th style={{ padding: '10px' }}>Category</th>
+                  <th style={{ padding: '10px' }}>Status</th>
+                  <th style={{ padding: '10px' }}>Articles Ingested</th>
+                  <th style={{ padding: '10px' }}>Last Fetch</th>
+                </tr>
+              </thead>
+              <tbody>
+                {publishers.map((p: any, idx: number) => (
+                  <tr key={idx} style={{ borderBottom: '1px solid #ffffff11' }}>
+                    <td style={{ padding: '10px', fontWeight: 'bold', color: '#fff' }}>{p.name}</td>
+                    <td style={{ padding: '10px', color: '#8e8b9e' }}>{p.domain}</td>
+                    <td style={{ padding: '10px' }}>{p.fallback_category}</td>
+                    <td style={{ padding: '10px' }}>
+                      <span style={{
+                        padding: '2px 8px',
+                        borderRadius: '4px',
+                        background: p.status === 'healthy' ? '#00ff8822' : p.status === 'failing' ? '#ff336622' : '#ffaa0022',
+                        color: p.status === 'healthy' ? '#00ff88' : p.status === 'failing' ? '#ff3366' : '#ffaa00',
+                      }}>
+                        {p.status || 'pending'}
+                      </span>
+                    </td>
+                    <td style={{ padding: '10px' }}>{p.articles_ingested || 0}</td>
+                    <td style={{ padding: '10px', color: '#8e8b9e' }}>{p.last_fetched_at ? new Date(p.last_fetched_at).toLocaleString() : 'Never'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       </div>

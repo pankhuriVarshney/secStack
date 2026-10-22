@@ -23,7 +23,12 @@ STOP_EXTRA = ["http", "https", "www", "com", "org", "blog", "2024", "2025",
               "2026", "part", "via", "amp", "utm_source"]
 
 
+import os
+import sys
+
 def _spark() -> SparkSession:
+    os.environ["PYSPARK_PYTHON"] = sys.executable
+    os.environ["PYSPARK_DRIVER_PYTHON"] = sys.executable
     return (SparkSession.builder
             .appName("secstack-clustering")
             .master("local[*]")
@@ -117,26 +122,35 @@ def run_clustering(verbose: bool = True) -> dict:
 
 
 def build_galaxy(clusters: list[dict]) -> dict:
-    """Planet layout: golden-angle spiral sized by cluster size; edges by
-    Jaccard similarity of top-term sets (inter-category conduits)."""
+    """Planet layout: golden-angle spiral sized by canonical category resource count;
+    edges by Jaccard similarity of top-term sets."""
     import math
-    ordered = sorted(clusters, key=lambda c: -c["size"])
+    from app.seed_data import CATEGORIES
+
     planets = []
-    for i, c in enumerate(ordered):
-        angle = i * 2.399963229728653          # golden angle (rad)
-        r = 8.0 * math.sqrt(i + 1)             # spiral radius (pre-normalization units)
+    for i, cat in enumerate(CATEGORIES):
+        count = db.resources.count_documents({"category": cat["slug"]})
+        matched = next((c for c in clusters if c["slug"].startswith(cat["slug"])), {})
+        top_terms = matched.get("top_terms", [cat["slug"].replace("-", " "), "security", "telemetry"])
+
+        angle = i * 2.399963229728653
+        r = 7.0 * math.sqrt(i + 1)
         cx = 50 + r * math.cos(angle) * 0.9
-        cy = 50 + r * math.sin(angle) * 0.62   # squash vertically -> galaxy ellipse
-        max_size = ordered[0]["size"] if ordered[0]["size"] else 1
+        cy = 50 + r * math.sin(angle) * 0.62
+
         planets.append({
-            "category_id": c["cluster_id"], "name": c["label"], "slug": c["slug"],
-            "description": next((x["description"] for x in CATEGORIES
-                                 if x["slug"] == c["slug"].split("-")[0]), ""),
-            "color": c["color"], "resource_count": c["size"],
-            "cx": round(cx, 2), "cy": round(cy, 2),
-            "radius": round(6 + 10 * (c["size"] / max_size) ** 0.5, 2),
-            "top_terms": c["top_terms"],
+            "category_id": i,
+            "name": cat["name"],
+            "slug": cat["slug"],
+            "description": cat["description"],
+            "color": cat["color"],
+            "resource_count": count,
+            "cx": round(cx, 2),
+            "cy": round(cy, 2),
+            "radius": round(6 + 8 * min(math.log(count + 1), 3), 2),
+            "top_terms": top_terms[:5],
         })
+
     # normalize coords into 0..100
     xs = [p["cx"] for p in planets]; ys = [p["cy"] for p in planets]
     span = max(max(xs) - min(xs), max(ys) - min(ys), 1)
@@ -158,6 +172,6 @@ def build_galaxy(clusters: list[dict]) -> dict:
                 best.append({"from": a["slug"], "to": b["slug"],
                              "strength": round(jac, 3)})
         best.sort(key=lambda e: -e["strength"])
-        edges.extend(best[:2])                     # max 2 conduits per planet
-    edges = [e for e in edges if e["strength"] >= 0.05]
+        edges.extend(best[:2])
+    edges = [e for e in edges if e["strength"] >= 0.02]
     return {"planets": planets, "edges": edges}

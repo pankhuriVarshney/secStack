@@ -229,6 +229,10 @@ export async function getHarnessManifest() {
   return fetchFromApi('/agent/harness/manifest');
 }
 
+export async function getPublisherStats() {
+  return fetchFromApi('/stats/publishers');
+}
+
 /**
  * The lab's target is BUILT from a Dockerfile + app code, not a pulled image,
  * so a single docker-compose.yml can't run it alone. This downloads the whole

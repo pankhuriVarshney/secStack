@@ -8,7 +8,7 @@ DB_NAME = os.getenv("DB_NAME", "secstack")
 API_HOST = os.getenv("API_HOST", "0.0.0.0")
 API_PORT = int(os.getenv("API_PORT", "8000"))
 SEED_SIZE = int(os.getenv("SEED_SIZE", "600"))
-K_CLUSTERS = int(os.getenv("K_CLUSTERS", "8"))
+K_CLUSTERS = int(os.getenv("K_CLUSTERS", "15"))
 
 # Agentic AI layer
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
